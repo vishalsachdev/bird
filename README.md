@@ -91,6 +91,20 @@ bird check
    - Requires Chrome to be logged into x.com
    - May prompt for keychain access on first run
 
+### Posting via Sweetistics (API key)
+
+If you have a Sweetistics API key, `bird` can post through the Sweetistics SaaS instead of using local Twitter cookies:
+
+```bash
+export SWEETISTICS_API_KEY="sweet-..."
+bird tweet "Hello from Sweetistics!"
+
+# Optional: point to a self-hosted instance
+bird --sweetistics-base-url "http://localhost:3000" --sweetistics-api-key "sweet-..." tweet "hi"
+```
+
+When an API key is present, `bird` will use Sweetistics’ `/api/actions/tweet` endpoint and skip local cookie resolution.
+
 ### Getting Your Cookies
 
 1. Open Chrome and log into x.com

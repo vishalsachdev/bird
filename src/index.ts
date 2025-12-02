@@ -13,6 +13,7 @@ import { Command } from 'commander';
 import { resolveCredentials } from './lib/cookies.js';
 import { extractTweetId } from './lib/extract-tweet-id.js';
 import { TwitterClient } from './lib/twitter-client.js';
+import { SweetisticsClient } from './lib/sweetistics-client.js';
 
 const program = new Command();
 
@@ -22,7 +23,21 @@ program.name('bird').description('Post tweets and replies via Twitter/X GraphQL 
 program
   .option('--auth-token <token>', 'Twitter auth_token cookie')
   .option('--ct0 <token>', 'Twitter ct0 cookie')
-  .option('--chrome-profile <name>', 'Chrome profile name for cookie extraction');
+  .option('--chrome-profile <name>', 'Chrome profile name for cookie extraction')
+  .option('--sweetistics-api-key <key>', 'Sweetistics API key (or set SWEETISTICS_API_KEY)')
+  .option('--sweetistics-base-url <url>', 'Sweetistics base URL', process.env.SWEETISTICS_BASE_URL || 'https://sweetistics.com');
+
+function resolveSweetisticsConfig(options: { sweetisticsApiKey?: string; sweetisticsBaseUrl?: string }) {
+  const apiKey =
+    options.sweetisticsApiKey ||
+    process.env.SWEETISTICS_API_KEY ||
+    process.env.SWEETISTICS_LOCALHOST_API_KEY ||
+    null;
+
+  const baseUrl = options.sweetisticsBaseUrl || process.env.SWEETISTICS_BASE_URL || 'https://sweetistics.com';
+
+  return { apiKey, baseUrl };
+}
 
 // Tweet command
 program
@@ -31,6 +46,30 @@ program
   .argument('<text>', 'Tweet text')
   .action(async (text: string) => {
     const opts = program.opts();
+    const sweetistics = resolveSweetisticsConfig(opts);
+
+    if (sweetistics.apiKey) {
+      try {
+        const client = new SweetisticsClient({
+          baseUrl: sweetistics.baseUrl,
+          apiKey: sweetistics.apiKey,
+        });
+        const result = await client.tweet(text);
+        if (result.success) {
+          console.log('✅ Tweet posted via Sweetistics!');
+          if (result.tweetId) {
+            console.log(`🔗 https://x.com/i/status/${result.tweetId}`);
+          }
+          return;
+        }
+        console.error(`❌ Sweetistics post failed: ${result.error ?? 'Unknown error'}`);
+        process.exit(1);
+      } catch (error) {
+        console.error(`❌ Sweetistics error: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+      }
+    }
+
     const { cookies, warnings } = await resolveCredentials({
       authToken: opts.authToken,
       ct0: opts.ct0,
@@ -70,6 +109,31 @@ program
   .argument('<text>', 'Reply text')
   .action(async (tweetIdOrUrl: string, text: string) => {
     const opts = program.opts();
+    const sweetistics = resolveSweetisticsConfig(opts);
+    const tweetId = extractTweetId(tweetIdOrUrl);
+
+    if (sweetistics.apiKey) {
+      try {
+        const client = new SweetisticsClient({
+          baseUrl: sweetistics.baseUrl,
+          apiKey: sweetistics.apiKey,
+        });
+        const result = await client.tweet(text, tweetId);
+        if (result.success) {
+          console.log('✅ Reply posted via Sweetistics!');
+          if (result.tweetId) {
+            console.log(`🔗 https://x.com/i/status/${result.tweetId}`);
+          }
+          return;
+        }
+        console.error(`❌ Sweetistics reply failed: ${result.error ?? 'Unknown error'}`);
+        process.exit(1);
+      } catch (error) {
+        console.error(`❌ Sweetistics error: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+      }
+    }
+
     const { cookies, warnings } = await resolveCredentials({
       authToken: opts.authToken,
       ct0: opts.ct0,
@@ -89,7 +153,6 @@ program
       console.error(`📍 Using credentials from: ${cookies.source}`);
     }
 
-    const tweetId = extractTweetId(tweetIdOrUrl);
     console.error(`📝 Replying to tweet: ${tweetId}`);
 
     const client = new TwitterClient({ cookies });
