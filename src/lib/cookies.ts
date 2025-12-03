@@ -294,6 +294,8 @@ export async function resolveCredentials(options: {
   ct0?: string;
   chromeProfile?: string;
   firefoxProfile?: string;
+  allowChrome?: boolean;
+  allowFirefox?: boolean;
 }): Promise<CookieExtractionResult> {
   const warnings: string[] = [];
   const cookies: TwitterCookies = {
@@ -338,8 +340,11 @@ export async function resolveCredentials(options: {
     }
   }
 
+  const allowFirefox = options.allowFirefox ?? true;
+  const allowChrome = options.allowChrome ?? true;
+
   // 3. Firefox cookies (preferred browser fallback)
-  if (!cookies.authToken || !cookies.ct0) {
+  if (allowFirefox && (!cookies.authToken || !cookies.ct0)) {
     const firefoxResult = await extractCookiesFromFirefox(options.firefoxProfile);
     warnings.push(...firefoxResult.warnings);
 
@@ -354,7 +359,7 @@ export async function resolveCredentials(options: {
   }
 
   // 4. Chrome cookies (secondary browser fallback)
-  if (!cookies.authToken || !cookies.ct0) {
+  if (allowChrome && (!cookies.authToken || !cookies.ct0)) {
     const chromeResult = await extractCookiesFromChrome(options.chromeProfile);
     warnings.push(...chromeResult.warnings);
 

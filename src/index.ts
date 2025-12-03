@@ -44,6 +44,8 @@ type BirdConfig = {
   firefoxProfile?: string;
   sweetisticsApiKey?: string;
   sweetisticsBaseUrl?: string;
+  allowChrome?: boolean;
+  allowFirefox?: boolean;
 };
 
 function readConfigFile(path: string): Partial<BirdConfig> {
@@ -210,6 +212,8 @@ program
       ct0: opts.ct0,
       chromeProfile: opts.chromeProfile || config.chromeProfile,
       firefoxProfile: opts.firefoxProfile || config.firefoxProfile,
+      allowChrome: config.allowChrome ?? true,
+      allowFirefox: config.allowFirefox ?? true,
     });
 
     for (const warning of warnings) {
@@ -299,6 +303,8 @@ program
       ct0: opts.ct0,
       chromeProfile: opts.chromeProfile || config.chromeProfile,
       firefoxProfile: opts.firefoxProfile || config.firefoxProfile,
+      allowChrome: config.allowChrome ?? true,
+      allowFirefox: config.allowFirefox ?? true,
     });
 
     for (const warning of warnings) {
@@ -390,6 +396,8 @@ program
       ct0: opts.ct0,
       chromeProfile: opts.chromeProfile || config.chromeProfile,
       firefoxProfile: opts.firefoxProfile || config.firefoxProfile,
+      allowChrome: config.allowChrome ?? true,
+      allowFirefox: config.allowFirefox ?? true,
     });
 
     for (const warning of warnings) {
@@ -778,6 +786,8 @@ program
       ct0: opts.ct0,
       chromeProfile: opts.chromeProfile || config.chromeProfile,
       firefoxProfile: opts.firefoxProfile || config.firefoxProfile,
+      allowChrome: config.allowChrome ?? true,
+      allowFirefox: config.allowFirefox ?? true,
     });
 
     for (const warning of warnings) {

@@ -60,7 +60,9 @@ Example `~/.config/bird/config.json5` (Firefox + GraphQL defaults):
   // Prefer Firefox cookies by default
   firefoxProfile: "default-release",
   // Optional: Sweetistics defaults if you want fallback/overrides
-  sweetisticsApiKey: "sweet-..."
+  sweetisticsApiKey: "sweet-...",
+  // Disable Chrome cookies entirely (optional)
+  allowChrome: false
 }
 ```
 
