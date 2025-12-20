@@ -295,6 +295,185 @@ describe('TwitterClient', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('HTTP 404');
     });
+
+    it('should return article text when present', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            tweetResult: {
+              result: {
+                rest_id: 'article123',
+                legacy: {
+                  full_text: '',
+                  created_at: 'Mon Jan 01 00:00:00 +0000 2024',
+                },
+                article: {
+                  article_results: {
+                    result: {
+                      title: '2025 LLM Year in Review',
+                      sections: [
+                        {
+                          items: [
+                            { text: 'Intro paragraph of the article.' },
+                            { content: { text: 'Second paragraph.' } },
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+                core: {
+                  user_results: {
+                    result: {
+                      legacy: {
+                        screen_name: 'author',
+                        name: 'Article Author',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.getTweet('article123');
+
+      expect(result.success).toBe(true);
+      expect(result.tweet?.text).toBe(
+        '2025 LLM Year in Review\n\nIntro paragraph of the article.\n\nSecond paragraph.',
+      );
+    });
+
+    it('should fall back to user article timeline for plain text', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              tweetResult: {
+                result: {
+                  rest_id: 'article123',
+                  legacy: {
+                    full_text: '',
+                    created_at: 'Mon Jan 01 00:00:00 +0000 2024',
+                  },
+                  article: {
+                    article_results: {
+                      result: {
+                        title: '2025 LLM Year in Review',
+                      },
+                    },
+                  },
+                  core: {
+                    user_results: {
+                      result: {
+                        rest_id: '33836629',
+                        legacy: {
+                          screen_name: 'author',
+                          name: 'Article Author',
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            data: {
+              user: {
+                result: {
+                  timeline: {
+                    timeline: {
+                      instructions: [
+                        {
+                          entries: [
+                            {
+                              content: {
+                                itemContent: {
+                                  tweet_results: {
+                                    result: {
+                                      rest_id: 'article123',
+                                      article: {
+                                        article_results: {
+                                          result: {
+                                            title: '2025 LLM Year in Review',
+                                            plain_text: 'Full article body.',
+                                          },
+                                        },
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          }),
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.getTweet('article123');
+
+      expect(result.success).toBe(true);
+      expect(result.tweet?.text).toBe('2025 LLM Year in Review\n\nFull article body.');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should return note tweet text when present', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          data: {
+            tweetResult: {
+              result: {
+                rest_id: 'note123',
+                legacy: {
+                  full_text: '',
+                  created_at: 'Mon Jan 01 00:00:00 +0000 2024',
+                },
+                note_tweet: {
+                  note_tweet_results: {
+                    result: {
+                      text: 'Long form note content.',
+                    },
+                  },
+                },
+                core: {
+                  user_results: {
+                    result: {
+                      legacy: {
+                        screen_name: 'noter',
+                        name: 'Note Author',
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.getTweet('note123');
+
+      expect(result.success).toBe(true);
+      expect(result.tweet?.text).toBe('Long form note content.');
+    });
   });
 
   describe('getCurrentUser', () => {
@@ -372,6 +551,85 @@ describe('TwitterClient', () => {
       expect(result.user?.username).toBe('fallback');
       expect(result.user?.id).toBe('999');
       expect(mockFetch).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('search', () => {
+    let mockFetch: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      mockFetch = vi.fn();
+      global.fetch = mockFetch as unknown as typeof fetch;
+    });
+
+    it('retries on 404 and posts search payload', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          text: async () => '',
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: {
+              search_by_raw_query: {
+                search_timeline: {
+                  timeline: {
+                    instructions: [
+                      {
+                        entries: [
+                          {
+                            content: {
+                              itemContent: {
+                                tweet_results: {
+                                  result: {
+                                    rest_id: '1',
+                                    legacy: {
+                                      full_text: 'found',
+                                      created_at: '2024-01-01T00:00:00Z',
+                                      reply_count: 0,
+                                      retweet_count: 0,
+                                      favorite_count: 0,
+                                      conversation_id_str: '1',
+                                    },
+                                    core: {
+                                      user_results: {
+                                        result: { legacy: { screen_name: 'root', name: 'Root' } },
+                                      },
+                                    },
+                                  },
+                                },
+                              },
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+          }),
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.search('needle', 1);
+
+      expect(result.success).toBe(true);
+      expect(result.tweets?.[0].id).toBe('1');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      const [url, options] = mockFetch.mock.calls[1];
+      expect(options.method).toBe('POST');
+      const body = JSON.parse(options.body);
+      expect(body.features).toBeDefined();
+      expect(body.queryId).toBeDefined();
+      const urlVars = new URL(url as string).searchParams.get('variables');
+      expect(urlVars).toBeTruthy();
+      const parsed = JSON.parse(urlVars as string) as { rawQuery?: string };
+      expect(parsed.rawQuery).toBe('needle');
     });
   });
 
@@ -455,9 +713,12 @@ describe('TwitterClient', () => {
     it('getThread returns sorted thread by createdAt', async () => {
       const payload = makeConversationPayload();
       // swap dates to verify sorting
-      payload.data.threaded_conversation_with_injections_v2.instructions[0]?.entries?.[0]?.content?.itemContent?.tweet_results?.result?.legacy &&
-        ((payload.data.threaded_conversation_with_injections_v2.instructions[0]!.entries![0]!.content!.itemContent!
-          .tweet_results!.result!.legacy!.created_at = '2024-01-03T00:00:00Z'));
+      const legacy =
+        payload.data.threaded_conversation_with_injections_v2.instructions[0]?.entries?.[0]?.content?.itemContent
+          ?.tweet_results?.result?.legacy;
+      if (legacy) {
+        legacy.created_at = '2024-01-03T00:00:00Z';
+      }
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -470,6 +731,51 @@ describe('TwitterClient', () => {
 
       expect(result.success).toBe(true);
       expect(result.tweets?.map((t) => t.id)).toEqual(['2', '1']); // sorted by createdAt asc
+    });
+
+    it('getThread includes tweets from timeline module items', async () => {
+      const payload = makeConversationPayload();
+      payload.data.threaded_conversation_with_injections_v2.instructions[0]?.entries?.push({
+        content: {
+          items: [
+            {
+              item: {
+                itemContent: {
+                  tweet_results: {
+                    result: {
+                      rest_id: '3',
+                      legacy: {
+                        full_text: 'nested reply',
+                        created_at: '2024-01-04T00:00:00Z',
+                        reply_count: 0,
+                        retweet_count: 0,
+                        favorite_count: 0,
+                        conversation_id_str: '1',
+                        in_reply_to_status_id_str: '1',
+                      },
+                      core: {
+                        user_results: { result: { legacy: { screen_name: 'nested', name: 'Nested' } } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+        },
+      });
+
+      mockFetch.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => payload,
+      });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.getThread('1');
+
+      expect(result.success).toBe(true);
+      expect(result.tweets?.map((t) => t.id)).toEqual(['1', '2', '3']);
     });
 
     it('propagates fetchTweetDetail errors', async () => {
