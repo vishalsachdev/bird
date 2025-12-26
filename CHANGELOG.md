@@ -2,6 +2,10 @@
 
 ## 0.2.0 — Unreleased
 
+### Added
+- Output controls: `--plain`, `--no-emoji`, `--no-color` (respects `NO_COLOR`).
+- `help` command: `bird help <command>`.
+
 ### Fixed
 - CLI `--version`: read version from `package.json`/`VERSION` (no hardcoded string) + append git sha when available.
 

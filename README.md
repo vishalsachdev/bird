@@ -16,6 +16,9 @@ pnpm add -g @steipete/bird
 # Show the logged-in account
 bird whoami
 
+# Discover command help
+bird help whoami
+
 # Read a tweet (URL or ID)
 bird read https://x.com/user/status/1234567890123456789
 bird 1234567890123456789 --json
@@ -98,6 +101,11 @@ Environment shortcuts:
 - `read` returns full text for Notes and Articles when present.
 - Use `--plain` for stable, script-friendly output (no emoji, no color).
 
+Exit codes:
+- `0`: success
+- `1`: runtime error (network/auth/etc)
+- `2`: invalid usage/validation (e.g. bad `--user` handle)
+
 ## Version
 
 `bird --version` prints `package.json` version plus current git sha when available, e.g. `0.2.0 (3df7969b)`.
@@ -123,6 +131,7 @@ pnpm run build:dist  # dist/ only
 pnpm run build:binary
 
 pnpm run dev tweet "Test"
+pnpm run dev -- --plain check
 pnpm test
 pnpm run lint
 ```
