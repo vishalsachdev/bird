@@ -8,6 +8,11 @@
 npm install -g @steipete/bird
 # or
 pnpm add -g @steipete/bird
+# or
+bun add -g @steipete/bird
+
+# one-shot (no install)
+bunx @steipete/bird whoami
 ```
 
 Homebrew (macOS, prebuilt Bun binary):
@@ -68,6 +73,10 @@ Global options:
 
 GraphQL mode uses your existing X/Twitter web session (no password prompt). It sends requests to internal
 X endpoints and authenticates via cookies (`auth_token`, `ct0`).
+
+Write operations:
+- `tweet`/`reply` primarily use GraphQL (`CreateTweet`).
+- If GraphQL returns error `226` (“automated request”), `bird` falls back to the legacy `statuses/update.json` endpoint.
 
 `bird` resolves credentials in this order:
 
@@ -172,4 +181,4 @@ pnpm run lint
 ## Notes
 
 - GraphQL uses internal X endpoints and can be rate limited (429).
-- Query IDs rotate; refresh them with `pnpm run graphql:update`.
+- Query IDs rotate; refresh at runtime with `bird query-ids --fresh` (or update the baked baseline via `pnpm run graphql:update`).

@@ -2,6 +2,7 @@
  * Twitter GraphQL API client for posting tweets and replies
  */
 
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { TwitterCookies } from './cookies.js';
 import queryIds from './query-ids.json' with { type: 'json' };
 import { runtimeQueryIds } from './runtime-query-ids.js';
@@ -10,6 +11,7 @@ const TWITTER_API_BASE = 'https://x.com/i/api/graphql';
 const TWITTER_GRAPHQL_POST_URL = 'https://x.com/i/api/graphql';
 const TWITTER_UPLOAD_URL = 'https://upload.twitter.com/i/media/upload.json';
 const TWITTER_MEDIA_METADATA_URL = 'https://x.com/i/api/1.1/media/metadata/create.json';
+const TWITTER_STATUS_UPDATE_URL = 'https://x.com/i/api/1.1/statuses/update.json';
 
 // Query IDs rotate frequently; the values in query-ids.json are refreshed by
 // scripts/update-query-ids.ts. The fallback values keep the client usable if
@@ -254,8 +256,12 @@ interface CreateTweetResponse {
 export class TwitterClient {
   private authToken: string;
   private ct0: string;
+  private cookieHeader: string;
   private userAgent: string;
   private timeoutMs?: number;
+  private clientUuid: string;
+  private clientDeviceId: string;
+  private clientUserId?: string;
 
   constructor(options: TwitterClientOptions) {
     if (!options.cookies.authToken || !options.cookies.ct0) {
@@ -263,10 +269,13 @@ export class TwitterClient {
     }
     this.authToken = options.cookies.authToken;
     this.ct0 = options.cookies.ct0;
+    this.cookieHeader = options.cookies.cookieHeader || `auth_token=${this.authToken}; ct0=${this.ct0}`;
     this.userAgent =
       options.userAgent ||
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
     this.timeoutMs = options.timeoutMs;
+    this.clientUuid = randomUUID();
+    this.clientDeviceId = randomUUID();
   }
 
   private async getQueryId(operationName: OperationName): Promise<string> {
@@ -343,19 +352,34 @@ export class TwitterClient {
     return this.getJsonHeaders();
   }
 
+  private createTransactionId(): string {
+    return randomBytes(16).toString('hex');
+  }
+
   private getBaseHeaders(): Record<string, string> {
-    return {
+    const headers: Record<string, string> = {
+      accept: '*/*',
+      'accept-language': 'en-US,en;q=0.9',
       authorization:
         'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
       'x-csrf-token': this.ct0,
       'x-twitter-auth-type': 'OAuth2Session',
       'x-twitter-active-user': 'yes',
       'x-twitter-client-language': 'en',
-      cookie: `auth_token=${this.authToken}; ct0=${this.ct0}`,
+      'x-client-uuid': this.clientUuid,
+      'x-twitter-client-deviceid': this.clientDeviceId,
+      'x-client-transaction-id': this.createTransactionId(),
+      cookie: this.cookieHeader,
       'user-agent': this.userAgent,
       origin: 'https://x.com',
       referer: 'https://x.com/',
     };
+
+    if (this.clientUserId) {
+      headers['x-twitter-client-user-id'] = this.clientUserId;
+    }
+
+    return headers;
   }
 
   private getJsonHeaders(): Record<string, string> {
@@ -1278,6 +1302,7 @@ export class TwitterClient {
     variables: Record<string, unknown>,
     features: Record<string, boolean>,
   ): Promise<TweetResult> {
+    await this.ensureClientUserId();
     let queryId = await this.getQueryId('CreateTweet');
     let urlWithOperation = `${TWITTER_API_BASE}/${queryId}/CreateTweet`;
 
@@ -1285,9 +1310,10 @@ export class TwitterClient {
     let body = buildBody();
 
     try {
+      const headers = { ...this.getHeaders(), referer: 'https://x.com/compose/post' };
       let response = await this.fetchWithTimeout(urlWithOperation, {
         method: 'POST',
-        headers: this.getHeaders(),
+        headers,
         body,
       });
 
@@ -1301,14 +1327,14 @@ export class TwitterClient {
 
         response = await this.fetchWithTimeout(urlWithOperation, {
           method: 'POST',
-          headers: this.getHeaders(),
+          headers: { ...this.getHeaders(), referer: 'https://x.com/compose/post' },
           body,
         });
 
         if (response.status === 404) {
           const retry = await this.fetchWithTimeout(TWITTER_GRAPHQL_POST_URL, {
             method: 'POST',
-            headers: this.getHeaders(),
+            headers: { ...this.getHeaders(), referer: 'https://x.com/compose/post' },
             body,
           });
 
@@ -1320,7 +1346,9 @@ export class TwitterClient {
           const data = (await retry.json()) as CreateTweetResponse;
 
           if (data.errors && data.errors.length > 0) {
-            return { success: false, error: data.errors.map((e) => e.message).join(', ') };
+            const fallback = await this.tryStatusUpdateFallback(data.errors, variables);
+            if (fallback) return fallback;
+            return { success: false, error: this.formatErrors(data.errors) };
           }
 
           const tweetId = data.data?.create_tweet?.tweet_results?.result?.rest_id;
@@ -1341,9 +1369,11 @@ export class TwitterClient {
       const data = (await response.json()) as CreateTweetResponse;
 
       if (data.errors && data.errors.length > 0) {
+        const fallback = await this.tryStatusUpdateFallback(data.errors, variables);
+        if (fallback) return fallback;
         return {
           success: false,
-          error: data.errors.map((e) => e.message).join(', '),
+          error: this.formatErrors(data.errors),
         };
       }
 
@@ -1364,6 +1394,123 @@ export class TwitterClient {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
+    }
+  }
+
+  private formatErrors(errors: Array<{ message: string; code?: number }>): string {
+    return errors
+      .map((error) => (typeof error.code === 'number' ? `${error.message} (${error.code})` : error.message))
+      .join(', ');
+  }
+
+  private statusUpdateInputFromCreateTweetVariables(variables: Record<string, unknown>): {
+    text: string;
+    inReplyToTweetId?: string;
+    mediaIds?: string[];
+  } | null {
+    const text = typeof variables.tweet_text === 'string' ? variables.tweet_text : null;
+    if (!text) return null;
+
+    const reply = variables.reply;
+    const inReplyToTweetId =
+      reply &&
+      typeof reply === 'object' &&
+      typeof (reply as { in_reply_to_tweet_id?: unknown }).in_reply_to_tweet_id === 'string'
+        ? (reply as { in_reply_to_tweet_id: string }).in_reply_to_tweet_id
+        : undefined;
+
+    const media = variables.media;
+    const mediaEntities =
+      media && typeof media === 'object' ? (media as { media_entities?: unknown }).media_entities : undefined;
+
+    const mediaIds = Array.isArray(mediaEntities)
+      ? mediaEntities
+          .map((entity) =>
+            entity && typeof entity === 'object' && 'media_id' in (entity as Record<string, unknown>)
+              ? (entity as { media_id?: unknown }).media_id
+              : undefined,
+          )
+          .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
+          .map((value) => String(value))
+      : undefined;
+
+    return { text, inReplyToTweetId, mediaIds: mediaIds && mediaIds.length > 0 ? mediaIds : undefined };
+  }
+
+  private async postStatusUpdate(input: {
+    text: string;
+    inReplyToTweetId?: string;
+    mediaIds?: string[];
+  }): Promise<TweetResult> {
+    const params = new URLSearchParams();
+    params.set('status', input.text);
+    if (input.inReplyToTweetId) {
+      params.set('in_reply_to_status_id', input.inReplyToTweetId);
+      params.set('auto_populate_reply_metadata', 'true');
+    }
+    if (input.mediaIds && input.mediaIds.length > 0) {
+      params.set('media_ids', input.mediaIds.join(','));
+    }
+
+    try {
+      const response = await this.fetchWithTimeout(TWITTER_STATUS_UPDATE_URL, {
+        method: 'POST',
+        headers: {
+          ...this.getBaseHeaders(),
+          'content-type': 'application/x-www-form-urlencoded',
+          referer: 'https://x.com/compose/post',
+        },
+        body: params.toString(),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        return { success: false, error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+      }
+
+      const data = (await response.json()) as {
+        id_str?: string;
+        id?: string | number;
+        errors?: Array<{ message: string; code?: number }>;
+      };
+
+      if (data.errors && data.errors.length > 0) {
+        return { success: false, error: this.formatErrors(data.errors) };
+      }
+
+      const tweetId =
+        typeof data.id_str === 'string' ? data.id_str : data.id !== undefined ? String(data.id) : undefined;
+
+      if (tweetId) return { success: true, tweetId };
+      return { success: false, error: 'Tweet created but no ID returned' };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private async tryStatusUpdateFallback(
+    errors: Array<{ message: string; code?: number }>,
+    variables: Record<string, unknown>,
+  ): Promise<TweetResult | null> {
+    if (!errors.some((error) => error.code === 226)) return null;
+    const input = this.statusUpdateInputFromCreateTweetVariables(variables);
+    if (!input) return null;
+
+    const fallback = await this.postStatusUpdate(input);
+    if (fallback.success) return fallback;
+
+    return {
+      success: false,
+      error: `${this.formatErrors(errors)} | fallback: ${fallback.error ?? 'Unknown error'}`,
+    };
+  }
+
+  private async ensureClientUserId(): Promise<void> {
+    if (process.env.NODE_ENV === 'test') return;
+    if (this.clientUserId) return;
+    const result = await this.getCurrentUser();
+    if (result.success && result.user?.id) {
+      this.clientUserId = result.user.id;
     }
   }
 
@@ -1543,6 +1690,7 @@ export class TwitterClient {
                   : null;
 
         if (username && userId) {
+          this.clientUserId = userId;
           return {
             success: true,
             user: {
@@ -1565,7 +1713,7 @@ export class TwitterClient {
       try {
         const response = await this.fetchWithTimeout(page, {
           headers: {
-            cookie: `auth_token=${this.authToken}; ct0=${this.ct0}`,
+            cookie: this.cookieHeader,
             'user-agent': this.userAgent,
           },
         });

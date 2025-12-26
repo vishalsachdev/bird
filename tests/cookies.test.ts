@@ -160,6 +160,8 @@ describe('cookies', () => {
       const result = await resolveCredentials({ cookieSource: 'safari' });
       expect(result.cookies.authToken).toBe('safari_auth');
       expect(result.cookies.ct0).toBe('safari_ct0');
+      expect(result.cookies.cookieHeader).toContain('auth_token=safari_auth');
+      expect(result.cookies.cookieHeader).toContain('ct0=safari_ct0');
       expect(result.cookies.source).toBe('Safari');
     });
 
@@ -188,6 +190,8 @@ describe('cookies', () => {
 
       expect(result.cookies.authToken).toBe('firefox_auth');
       expect(result.cookies.ct0).toBe('firefox_ct0');
+      expect(result.cookies.cookieHeader).toContain('auth_token=firefox_auth');
+      expect(result.cookies.cookieHeader).toContain('ct0=firefox_ct0');
       expect(result.cookies.source).toContain('Firefox');
     });
 
@@ -203,6 +207,7 @@ describe('cookies', () => {
 
       expect(result.cookies.authToken).toBe('cli_auth');
       expect(result.cookies.ct0).toBe('cli_ct0');
+      expect(result.cookies.cookieHeader).toBe('auth_token=cli_auth; ct0=cli_ct0');
       expect(result.cookies.source).toBe('CLI argument');
     });
 

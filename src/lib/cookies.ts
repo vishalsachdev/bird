@@ -12,6 +12,7 @@ import { join } from 'node:path';
 export interface TwitterCookies {
   authToken: string | null;
   ct0: string | null;
+  cookieHeader: string | null;
   source: string | null;
 }
 
@@ -86,7 +87,6 @@ function getSafariCookiesPath(): string | null {
   return null;
 }
 
-const SAFARI_COOKIE_NAMES = new Set(['auth_token', 'ct0']);
 const SAFARI_COOKIE_DOMAINS = ['x.com', 'twitter.com'];
 const SAFARI_PAGE_SIGNATURE = Buffer.from([0x00, 0x00, 0x01, 0x00]);
 
@@ -104,7 +104,19 @@ function readSafariCString(buffer: Buffer, start: number, end: number): string |
   return buffer.toString('utf8', start, cursor);
 }
 
-function parseSafariCookieRecord(page: Buffer, offset: number, cookies: TwitterCookies): void {
+function serializeCookieJar(jar: Record<string, string>): string {
+  const entries = Object.entries(jar)
+    .filter(([, value]) => typeof value === 'string' && value.length > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  return entries.map(([name, value]) => `${name}=${value}`).join('; ');
+}
+
+function parseSafariCookieRecord(
+  page: Buffer,
+  offset: number,
+  jar: Record<string, string>,
+  cookies: TwitterCookies,
+): void {
   if (offset < 0 || offset + 4 > page.length) return;
   const recordSize = page.readUInt32LE(offset);
   const recordEnd = offset + recordSize;
@@ -123,10 +135,11 @@ function parseSafariCookieRecord(page: Buffer, offset: number, cookies: TwitterC
   const value = readSafariCString(page, offset + valueOffset, recordEnd);
 
   if (!name || !value || !matchesSafariDomain(domain)) return;
-  if (!SAFARI_COOKIE_NAMES.has(name)) return;
 
   const normalizedValue = normalizeValue(value);
   if (!normalizedValue) return;
+
+  jar[name] = normalizedValue;
 
   if (name === 'auth_token' && !cookies.authToken) {
     cookies.authToken = normalizedValue;
@@ -135,7 +148,7 @@ function parseSafariCookieRecord(page: Buffer, offset: number, cookies: TwitterC
   }
 }
 
-function parseSafariCookiePage(page: Buffer, cookies: TwitterCookies): void {
+function parseSafariCookiePage(page: Buffer, jar: Record<string, string>, cookies: TwitterCookies): void {
   if (page.length < 12) return;
   if (!page.subarray(0, 4).equals(SAFARI_PAGE_SIGNATURE)) return;
   const cookieCount = page.readUInt32LE(4);
@@ -150,12 +163,11 @@ function parseSafariCookiePage(page: Buffer, cookies: TwitterCookies): void {
   }
 
   for (const offset of offsets) {
-    parseSafariCookieRecord(page, offset, cookies);
-    if (cookies.authToken && cookies.ct0) return;
+    parseSafariCookieRecord(page, offset, jar, cookies);
   }
 }
 
-function parseSafariCookies(data: Buffer, cookies: TwitterCookies): void {
+function parseSafariCookies(data: Buffer, jar: Record<string, string>, cookies: TwitterCookies): void {
   if (data.length < 8) return;
   if (data.subarray(0, 4).toString('utf8') !== 'cook') return;
   const pageCount = data.readUInt32BE(4);
@@ -170,8 +182,7 @@ function parseSafariCookies(data: Buffer, cookies: TwitterCookies): void {
   for (const pageSize of pageSizes) {
     if (cursor + pageSize > data.length) return;
     const page = data.subarray(cursor, cursor + pageSize);
-    parseSafariCookiePage(page, cookies);
-    if (cookies.authToken && cookies.ct0) return;
+    parseSafariCookiePage(page, jar, cookies);
     cursor += pageSize;
   }
 }
@@ -184,6 +195,7 @@ export async function extractCookiesFromSafari(): Promise<CookieExtractionResult
   const cookies: TwitterCookies = {
     authToken: null,
     ct0: null,
+    cookieHeader: null,
     source: null,
   };
 
@@ -196,11 +208,15 @@ export async function extractCookiesFromSafari(): Promise<CookieExtractionResult
   let tempDir: string | null = null;
 
   try {
+    const jar: Record<string, string> = {};
     tempDir = mkdtempSync(join(tmpdir(), 'twitter-cli-'));
     const tempCookiesPath = join(tempDir, 'Cookies.binarycookies');
     copyFileSync(cookiesPath, tempCookiesPath);
     const data = readFileSync(tempCookiesPath);
-    parseSafariCookies(data, cookies);
+    parseSafariCookies(data, jar, cookies);
+    if (Object.keys(jar).length > 0) {
+      cookies.cookieHeader = serializeCookieJar(jar);
+    }
 
     if (cookies.authToken || cookies.ct0) {
       cookies.source = 'Safari';
@@ -293,6 +309,7 @@ export async function extractCookiesFromChrome(profile?: string): Promise<Cookie
   const cookies: TwitterCookies = {
     authToken: null,
     ct0: null,
+    cookieHeader: null,
     source: null,
   };
 
@@ -321,8 +338,10 @@ export async function extractCookiesFromChrome(profile?: string): Promise<Cookie
       copyFileSync(shmPath, `${tempDbPath}-shm`);
     }
 
+    const jar: Record<string, string> = {};
+
     // Use sqlite3 CLI to query cookies (no native deps required!)
-    const query = `SELECT name, hex(encrypted_value) as encrypted_hex FROM cookies WHERE host_key IN ('.x.com', '.twitter.com', 'x.com', 'twitter.com') AND name IN ('auth_token', 'ct0');`;
+    const query = `SELECT name, hex(encrypted_value) as encrypted_hex FROM cookies WHERE host_key IN ('.x.com', '.twitter.com', 'x.com', 'twitter.com');`;
 
     const result = execSync(`sqlite3 -separator '|' "${tempDbPath}" "${query}"`, {
       encoding: 'utf8',
@@ -336,6 +355,7 @@ export async function extractCookiesFromChrome(profile?: string): Promise<Cookie
 
         const decryptedValue = decryptCookieValue(encryptedHex);
         if (decryptedValue) {
+          jar[name] = decryptedValue;
           if (name === 'auth_token' && !cookies.authToken) {
             cookies.authToken = decryptedValue;
           } else if (name === 'ct0' && !cookies.ct0) {
@@ -343,6 +363,10 @@ export async function extractCookiesFromChrome(profile?: string): Promise<Cookie
           }
         }
       }
+    }
+
+    if (Object.keys(jar).length > 0) {
+      cookies.cookieHeader = serializeCookieJar(jar);
     }
 
     if (cookies.authToken || cookies.ct0) {
@@ -378,6 +402,7 @@ export async function extractCookiesFromFirefox(profile?: string): Promise<Cooki
   const cookies: TwitterCookies = {
     authToken: null,
     ct0: null,
+    cookieHeader: null,
     source: null,
   };
 
@@ -395,7 +420,9 @@ export async function extractCookiesFromFirefox(profile?: string): Promise<Cooki
     const tempDbPath = join(tempDir, 'cookies.sqlite');
     copyFileSync(cookiesPath, tempDbPath);
 
-    const query = `SELECT name, value FROM moz_cookies WHERE host IN ('.x.com', '.twitter.com', 'x.com', 'twitter.com') AND name IN ('auth_token', 'ct0');`;
+    const jar: Record<string, string> = {};
+
+    const query = `SELECT name, value FROM moz_cookies WHERE host IN ('.x.com', '.twitter.com', 'x.com', 'twitter.com');`;
 
     const result = execSync(`sqlite3 -separator '|' "${tempDbPath}" "${query}"`, {
       encoding: 'utf8',
@@ -406,12 +433,17 @@ export async function extractCookiesFromFirefox(profile?: string): Promise<Cooki
       for (const line of result.split('\n')) {
         const [name, value] = line.split('|');
         if (!name || !value) continue;
+        jar[name] = value;
         if (name === 'auth_token' && !cookies.authToken) {
           cookies.authToken = value;
         } else if (name === 'ct0' && !cookies.ct0) {
           cookies.ct0 = value;
         }
       }
+    }
+
+    if (Object.keys(jar).length > 0) {
+      cookies.cookieHeader = serializeCookieJar(jar);
     }
 
     if (cookies.authToken || cookies.ct0) {
@@ -454,6 +486,7 @@ export async function resolveCredentials(options: {
   const cookies: TwitterCookies = {
     authToken: null,
     ct0: null,
+    cookieHeader: null,
     source: null,
   };
 
@@ -495,6 +528,11 @@ export async function resolveCredentials(options: {
     }
   }
 
+  if (cookies.authToken && cookies.ct0) {
+    cookies.cookieHeader = `auth_token=${cookies.authToken}; ct0=${cookies.ct0}`;
+    return { cookies, warnings };
+  }
+
   const sourcesToTry: CookieSource[] = Array.isArray(cookieSource)
     ? cookieSource
     : cookieSource
@@ -502,19 +540,11 @@ export async function resolveCredentials(options: {
       : ['safari', 'chrome', 'firefox'];
 
   for (const source of sourcesToTry) {
-    if (cookies.authToken && cookies.ct0) break;
-
     if (source === 'safari') {
       const safariResult = await extractCookiesFromSafari();
       warnings.push(...safariResult.warnings);
-
-      if (!cookies.authToken && safariResult.cookies.authToken) {
-        cookies.authToken = safariResult.cookies.authToken;
-        cookies.source = safariResult.cookies.source;
-      }
-      if (!cookies.ct0 && safariResult.cookies.ct0) {
-        cookies.ct0 = safariResult.cookies.ct0;
-        if (!cookies.source) cookies.source = safariResult.cookies.source;
+      if (safariResult.cookies.authToken && safariResult.cookies.ct0) {
+        return { cookies: safariResult.cookies, warnings };
       }
       continue;
     }
@@ -522,14 +552,8 @@ export async function resolveCredentials(options: {
     if (source === 'chrome') {
       const chromeResult = await extractCookiesFromChrome(options.chromeProfile);
       warnings.push(...chromeResult.warnings);
-
-      if (!cookies.authToken && chromeResult.cookies.authToken) {
-        cookies.authToken = chromeResult.cookies.authToken;
-        cookies.source = chromeResult.cookies.source;
-      }
-      if (!cookies.ct0 && chromeResult.cookies.ct0) {
-        cookies.ct0 = chromeResult.cookies.ct0;
-        if (!cookies.source) cookies.source = chromeResult.cookies.source;
+      if (chromeResult.cookies.authToken && chromeResult.cookies.ct0) {
+        return { cookies: chromeResult.cookies, warnings };
       }
       continue;
     }
@@ -537,14 +561,8 @@ export async function resolveCredentials(options: {
     if (source === 'firefox') {
       const firefoxResult = await extractCookiesFromFirefox(options.firefoxProfile);
       warnings.push(...firefoxResult.warnings);
-
-      if (!cookies.authToken && firefoxResult.cookies.authToken) {
-        cookies.authToken = firefoxResult.cookies.authToken;
-        cookies.source = firefoxResult.cookies.source;
-      }
-      if (!cookies.ct0 && firefoxResult.cookies.ct0) {
-        cookies.ct0 = firefoxResult.cookies.ct0;
-        if (!cookies.source) cookies.source = firefoxResult.cookies.source;
+      if (firefoxResult.cookies.authToken && firefoxResult.cookies.ct0) {
+        return { cookies: firefoxResult.cookies, warnings };
       }
     }
   }
@@ -557,6 +575,10 @@ export async function resolveCredentials(options: {
   }
   if (!cookies.ct0) {
     warnings.push('Missing ct0 - provide via --ct0, CT0 env var, or login to x.com in Safari/Chrome/Firefox');
+  }
+
+  if (cookies.authToken && cookies.ct0) {
+    cookies.cookieHeader = `auth_token=${cookies.authToken}; ct0=${cookies.ct0}`;
   }
 
   return { cookies, warnings };

@@ -6,6 +6,7 @@ describe('TwitterClient', () => {
   const validCookies = {
     authToken: 'test_auth_token',
     ct0: 'test_ct0_token',
+    cookieHeader: 'auth_token=test_auth_token; ct0=test_ct0_token',
     source: 'test',
   };
 
@@ -19,7 +20,7 @@ describe('TwitterClient', () => {
       expect(
         () =>
           new TwitterClient({
-            cookies: { authToken: null, ct0: 'test', source: null },
+            cookies: { authToken: null, ct0: 'test', cookieHeader: null, source: null },
           }),
       ).toThrow('Both authToken and ct0 cookies are required');
     });
@@ -28,7 +29,7 @@ describe('TwitterClient', () => {
       expect(
         () =>
           new TwitterClient({
-            cookies: { authToken: 'test', ct0: null, source: null },
+            cookies: { authToken: 'test', ct0: null, cookieHeader: null, source: null },
           }),
       ).toThrow('Both authToken and ct0 cookies are required');
     });
@@ -167,6 +168,118 @@ describe('TwitterClient', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Rate limit exceeded');
+    });
+
+    it('falls back to statuses/update.json when CreateTweet returns code 226', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            errors: [
+              {
+                message: 'Authorization: This request looks like it might be automated.',
+                code: 226,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            id_str: '1234567890',
+          }),
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.tweet('Hello world!');
+
+      expect(result.success).toBe(true);
+      expect(result.tweetId).toBe('1234567890');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(String(mockFetch.mock.calls[1][0])).toContain('statuses/update.json');
+    });
+
+    it('surfaces statuses/update.json failure when CreateTweet returns code 226', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            errors: [
+              {
+                message: 'Authorization: This request looks like it might be automated.',
+                code: 226,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          text: async () => 'Forbidden',
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.tweet('Hello world!');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('(226)');
+      expect(result.error).toContain('fallback: HTTP 403');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(String(mockFetch.mock.calls[1][0])).toContain('statuses/update.json');
+    });
+
+    it('surfaces statuses/update.json API errors when CreateTweet returns code 226', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            errors: [
+              {
+                message: 'Authorization: This request looks like it might be automated.',
+                code: 226,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            errors: [{ message: 'Nope', code: 999 }],
+          }),
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.tweet('Hello world!');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('(226)');
+      expect(result.error).toContain('fallback: Nope (999)');
+    });
+
+    it('surfaces statuses/update.json missing id when CreateTweet returns code 226', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            errors: [
+              {
+                message: 'Authorization: This request looks like it might be automated.',
+                code: 226,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({}),
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.tweet('Hello world!');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('(226)');
+      expect(result.error).toContain('fallback: Tweet created but no ID returned');
     });
 
     it('should handle HTTP errors', async () => {
@@ -347,6 +460,42 @@ describe('TwitterClient', () => {
       expect(body.variables.tweet_text).toBe('This is a reply');
       expect(body.features.rweb_video_screen_enabled).toBe(true);
       expect(body.features.creator_subscriptions_tweet_preview_api_enabled).toBe(true);
+    });
+
+    it('falls back to statuses/update.json for replies when CreateTweet returns code 226', async () => {
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            errors: [
+              {
+                message: 'Authorization: This request looks like it might be automated.',
+                code: 226,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            id_str: '999',
+          }),
+        });
+
+      const client = new TwitterClient({ cookies: validCookies });
+      const result = await client.reply('This is a reply', '1234567890', ['111', '222']);
+
+      expect(result.success).toBe(true);
+      expect(result.tweetId).toBe('999');
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+
+      const [, options] = mockFetch.mock.calls[1];
+      expect(String(mockFetch.mock.calls[1][0])).toContain('statuses/update.json');
+      expect(options.method).toBe('POST');
+      expect(options.body).toContain('status=This+is+a+reply');
+      expect(options.body).toContain('in_reply_to_status_id=1234567890');
+      expect(options.body).toContain('auto_populate_reply_metadata=true');
+      expect(options.body).toContain('media_ids=111%2C222');
     });
   });
 
