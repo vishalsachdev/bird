@@ -2,6 +2,14 @@
 
 ## 0.5.1 — Unreleased
 
+### Changed
+- Help banner now includes `bird` version (and git sha when available).
+- Subcommand help now lists global options (credentials, output controls, timeouts, etc.).
+- Help output now documents config files and env vars.
+
+### Tests
+- Add regression test for global options in subcommand help.
+
 ## 0.5.0 — 2026-01-01
 
 ### Added

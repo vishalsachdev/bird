@@ -1,4 +1,4 @@
-# Releasing bird 0.1.x
+# Releasing bird
 
 Target destinations:
 - npm: `@steipete/bird`
@@ -6,7 +6,7 @@ Target destinations:
 
 ## Checklist (npm + GitHub)
 1) Version bump
-   - Update `package.json` `version` (semver, e.g., `0.1.0`).
+   - Update `package.json` `version` (semver, e.g., `0.5.0`).
    - Update `CHANGELOG.md` and tag the release section.
 
 2) Clean build & tests
@@ -17,9 +17,12 @@ Target destinations:
 3) Publish to npm (scoped)
    - Ensure you are logged in (`npm whoami`).
    - `npm publish --access public` (from repo root). Package name is `@steipete/bird`.
+   - Verify:
+     - `npm view @steipete/bird version`
+     - `npx -y @steipete/bird@<version> --help`
 
 4) Git tag & GitHub release
-   - `git tag v0.1.0 && git push origin v0.1.0`
+   - `git tag v<version> && git push origin v<version>`
    - Create GitHub release from the tag. Include changelog notes and attach optional binary (see below).
 
 ## Optional: attach compiled binary
@@ -29,17 +32,17 @@ If you want a single-file binary for Homebrew/GitHub assets:
 
 ## Homebrew tap update (steipete/homebrew-tap)
 1) Package the binary
-   - From repo root: `tar -czf bird-macos-universal-v0.1.0.tar.gz bird`
-   - Compute SHA: `shasum -a 256 bird-macos-universal-v0.1.0.tar.gz`
+   - From repo root: `tar -czf bird-macos-universal-v<version>.tar.gz bird`
+   - Compute SHA: `shasum -a 256 bird-macos-universal-v<version>.tar.gz`
 
 2) Update formula in tap repo
    - File: `homebrew-tap/bird.rb` (create if absent). Model it after `poltergeist.rb`.
    - Fields to update:
-     - `url "https://github.com/steipete/bird/releases/download/v0.1.0/bird-macos-universal-v0.1.0.tar.gz"`
+     - `url "https://github.com/steipete/bird/releases/download/v<version>/bird-macos-universal-v<version>.tar.gz"`
      - `sha256 "<calculated_sha>"`
-     - `version "0.1.0"`
+     - `version "<version>"`
    - Install block: `bin.install "bird"`
-   - `test do`: minimal `assert_match "0.1.0", shell_output("#{bin}/bird --version")`
+   - `test do`: minimal `assert_match "<version>", shell_output("#{bin}/bird --version")`
 
 3) Push tap changes
    - `git add bird.rb && git commit -m "bird 0.1.0" && git push`
