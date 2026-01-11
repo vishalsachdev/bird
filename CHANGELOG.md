@@ -12,6 +12,9 @@
 ### Changed
 - Feature flags can be overridden at runtime via `features.json` (refreshable via `query-ids`).
 
+### Fixed
+- GraphQL feature flags now include `post_ctas_fetch_enabled` to avoid 400s (#38) — thanks @philipp-spiess.
+
 ## 0.5.1 — 2026-01-01
 
 ### Changed
