@@ -4,6 +4,7 @@
 
 ### Fixed
 - macOS cookie extraction now supports Brave keychain storage (#40) — thanks @gakonst.
+- Terminal hyperlinks now sanitize control characters before emitting OSC 8 sequences (#29) — thanks @mafulafunk.
 - Following/followers pagination now guards repeat cursors and standardizes JSON output (#28) — thanks @malpern.
 - Lists GraphQL feature flags updated to prevent 400s (#27) — thanks @zheli.
 - Likes pagination now follows cursors and avoids stalling on duplicate pages (#12) — thanks @titouv.

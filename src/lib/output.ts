@@ -106,8 +106,10 @@ export function hyperlink(url: string, text?: string, cfg?: OutputConfig): strin
   if (!cfg?.hyperlinks) {
     return displayText;
   }
+  const safeUrl = url.replaceAll('\x1b', '').replaceAll('\x07', '');
+  const safeText = displayText.replaceAll('\x1b', '').replaceAll('\x07', '');
   // OSC 8 hyperlink: \x1b]8;;URL\x07TEXT\x1b]8;;\x07
-  return `\x1b]8;;${url}\x07${displayText}\x1b]8;;\x07`;
+  return `\x1b]8;;${safeUrl}\x07${safeText}\x1b]8;;\x07`;
 }
 
 export function formatTweetUrlLine(tweetId: string, cfg: OutputConfig): string {

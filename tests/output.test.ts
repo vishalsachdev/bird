@@ -111,4 +111,11 @@ describe('output', () => {
     expect(result).toContain('Click here');
     expect(result).toContain('\x1b]8;;https://x.com/test\x07');
   });
+
+  it('hyperlink strips OSC control characters from url and text', () => {
+    const cfg = { plain: false, emoji: true, color: true, hyperlinks: true };
+    const result = hyperlink('https://x.com/\u001btest\u0007', 'Hi\u001b\u0007', cfg);
+    expect(result).not.toContain('\u001btest\u0007');
+    expect(result).not.toContain('Hi\u001b\u0007');
+  });
 });
