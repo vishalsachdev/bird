@@ -120,10 +120,10 @@ describe('runtime-features', () => {
   it('includes required lists API feature flags', () => {
     const features = buildListsFeatures();
     expect(features.responsive_web_graphql_exclude_directive_enabled).toBe(true);
-    expect(features.blue_business_profile_image_shape_enabled).toBe(false);
+    expect(features.blue_business_profile_image_shape_enabled).toBe(true);
     expect(features.responsive_web_text_conversations_enabled).toBe(false);
     expect(features.tweetypie_unmention_optimization_enabled).toBe(true);
-    expect(features.vibe_api_enabled).toBe(false);
-    expect(features.interactive_text_enabled).toBe(false);
+    expect(features.vibe_api_enabled).toBe(true);
+    expect(features.interactive_text_enabled).toBe(true);
   });
 });

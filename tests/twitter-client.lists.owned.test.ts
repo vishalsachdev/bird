@@ -118,11 +118,11 @@ describe('TwitterClient lists owned', () => {
       const [url] = mockFetch.mock.calls[0];
       const parsedFeatures = JSON.parse(new URL(url as string).searchParams.get('features') as string);
       expect(parsedFeatures.responsive_web_graphql_exclude_directive_enabled).toBe(true);
-      expect(parsedFeatures.blue_business_profile_image_shape_enabled).toBe(false);
+      expect(parsedFeatures.blue_business_profile_image_shape_enabled).toBe(true);
       expect(parsedFeatures.responsive_web_text_conversations_enabled).toBe(false);
       expect(parsedFeatures.tweetypie_unmention_optimization_enabled).toBe(true);
-      expect(parsedFeatures.vibe_api_enabled).toBe(false);
-      expect(parsedFeatures.interactive_text_enabled).toBe(false);
+      expect(parsedFeatures.vibe_api_enabled).toBe(true);
+      expect(parsedFeatures.interactive_text_enabled).toBe(true);
     });
 
     it('handles private lists correctly', async () => {
