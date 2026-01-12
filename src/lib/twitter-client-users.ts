@@ -6,8 +6,21 @@ import {
   TWITTER_API_BASE,
 } from './twitter-client-constants.js';
 import { buildFollowingFeatures } from './twitter-client-features.js';
-import type { CurrentUserResult, FollowingResult } from './twitter-client-types.js';
+import type { CurrentUserResult, FollowingResult, TwitterUser } from './twitter-client-types.js';
 import { extractCursorFromInstructions, parseUsersFromInstructions } from './twitter-client-utils.js';
+
+type RestUser = {
+  id_str?: string;
+  id?: string | number;
+  screen_name?: string;
+  name?: string;
+  description?: string;
+  followers_count?: number;
+  friends_count?: number;
+  verified?: boolean;
+  profile_image_url_https?: string;
+  created_at?: string;
+};
 
 export interface TwitterClientUserMethods {
   getCurrentUser(): Promise<CurrentUserResult>;
@@ -32,6 +45,29 @@ export function withUsers<TBase extends AbstractConstructor<TwitterClientBase>>(
     private async getFollowersQueryIds(): Promise<string[]> {
       const primary = await this.getQueryId('Followers');
       return Array.from(new Set([primary, 'kuFUYP9eV1FPoEy4N-pi7w']));
+    }
+
+    private parseUsersFromRestResponse(users: RestUser[] | undefined): TwitterUser[] {
+      return (users ?? [])
+        .map((u) => {
+          const id = typeof u.id_str === 'string' ? u.id_str : typeof u.id === 'number' ? String(u.id) : null;
+          const username = typeof u.screen_name === 'string' ? u.screen_name : null;
+          if (!id || !username) {
+            return null;
+          }
+          return {
+            id,
+            username,
+            name: typeof u.name === 'string' && u.name.length > 0 ? u.name : username,
+            description: typeof u.description === 'string' ? u.description : undefined,
+            followersCount: typeof u.followers_count === 'number' ? u.followers_count : undefined,
+            followingCount: typeof u.friends_count === 'number' ? u.friends_count : undefined,
+            isBlueVerified: typeof u.verified === 'boolean' ? u.verified : undefined,
+            profileImageUrl: typeof u.profile_image_url_https === 'string' ? u.profile_image_url_https : undefined,
+            createdAt: typeof u.created_at === 'string' ? u.created_at : undefined,
+          };
+        })
+        .filter((u) => u !== null);
     }
 
     private async getFollowersViaRest(userId: string, count: number): Promise<FollowingResult> {
@@ -63,40 +99,10 @@ export function withUsers<TBase extends AbstractConstructor<TwitterClientBase>>(
           }
 
           const data = (await response.json()) as {
-            users?: Array<{
-              id_str?: string;
-              id?: string | number;
-              screen_name?: string;
-              name?: string;
-              description?: string;
-              followers_count?: number;
-              friends_count?: number;
-              verified?: boolean;
-              profile_image_url_https?: string;
-              created_at?: string;
-            }>;
+            users?: RestUser[];
           };
 
-          const users = (data.users ?? [])
-            .map((u) => {
-              const id = typeof u.id_str === 'string' ? u.id_str : typeof u.id === 'number' ? String(u.id) : null;
-              const username = typeof u.screen_name === 'string' ? u.screen_name : null;
-              if (!id || !username) {
-                return null;
-              }
-              return {
-                id,
-                username,
-                name: typeof u.name === 'string' && u.name.length > 0 ? u.name : username,
-                description: typeof u.description === 'string' ? u.description : undefined,
-                followersCount: typeof u.followers_count === 'number' ? u.followers_count : undefined,
-                followingCount: typeof u.friends_count === 'number' ? u.friends_count : undefined,
-                isBlueVerified: typeof u.verified === 'boolean' ? u.verified : undefined,
-                profileImageUrl: typeof u.profile_image_url_https === 'string' ? u.profile_image_url_https : undefined,
-                createdAt: typeof u.created_at === 'string' ? u.created_at : undefined,
-              };
-            })
-            .filter((u) => u !== null);
+          const users = this.parseUsersFromRestResponse(data.users);
 
           return { success: true, users };
         } catch (error) {
@@ -136,40 +142,10 @@ export function withUsers<TBase extends AbstractConstructor<TwitterClientBase>>(
           }
 
           const data = (await response.json()) as {
-            users?: Array<{
-              id_str?: string;
-              id?: string | number;
-              screen_name?: string;
-              name?: string;
-              description?: string;
-              followers_count?: number;
-              friends_count?: number;
-              verified?: boolean;
-              profile_image_url_https?: string;
-              created_at?: string;
-            }>;
+            users?: RestUser[];
           };
 
-          const users = (data.users ?? [])
-            .map((u) => {
-              const id = typeof u.id_str === 'string' ? u.id_str : typeof u.id === 'number' ? String(u.id) : null;
-              const username = typeof u.screen_name === 'string' ? u.screen_name : null;
-              if (!id || !username) {
-                return null;
-              }
-              return {
-                id,
-                username,
-                name: typeof u.name === 'string' && u.name.length > 0 ? u.name : username,
-                description: typeof u.description === 'string' ? u.description : undefined,
-                followersCount: typeof u.followers_count === 'number' ? u.followers_count : undefined,
-                followingCount: typeof u.friends_count === 'number' ? u.friends_count : undefined,
-                isBlueVerified: typeof u.verified === 'boolean' ? u.verified : undefined,
-                profileImageUrl: typeof u.profile_image_url_https === 'string' ? u.profile_image_url_https : undefined,
-                createdAt: typeof u.created_at === 'string' ? u.created_at : undefined,
-              };
-            })
-            .filter((u) => u !== null);
+          const users = this.parseUsersFromRestResponse(data.users);
 
           return { success: true, users };
         } catch (error) {
